@@ -55,6 +55,10 @@ The goal is to see whether the non-linear model (Random Forest) improves perform
 
 These steps assume you have **conda** installed (Anaconda / Miniconda).
 
+## 3.Run the main script
+
+conda activate premier-league-env
+python main.py
 
 
 
