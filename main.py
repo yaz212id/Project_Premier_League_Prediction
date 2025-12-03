@@ -1,106 +1,111 @@
 """
 Main script for Premier League project.
 
-Ce script sera exécuté par les correcteurs :
+This is the file that the graders will run:
 
     python main.py
-
-Pipeline :
-- charge les données historiques,
-- construit les features,
-- entraîne plusieurs modèles (baseline, RF, KNN, LogReg),
-- évalue les modèles sur la saison 2024/2025 (test),
-- choisit le meilleur modèle,
-- prédit les 14 premiers matches de 2025/2026,
-- construit le classement réel vs ML pour cette saison partielle,
-- sauvegarde le tableau dans results/.
 """
 
 import os
-
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix
 
 from src.data_loader import (
-    load_and_split,
-    load_future_season_for_prediction,
+    load_train_test_with_metadata,
+    load_future_season_features,
 )
 from src.models import (
     train_random_forest,
     train_knn,
     train_logistic_regression,
+    train_gradient_boosting,
 )
-from src.evaluation import evaluate_model, compute_points_table
+from src.evaluation import (
+    evaluate_model,
+    build_league_table,
+    plot_model_accuracies,
+)
+
+# Dossier où l'on sauvegarde les résultats (images, CSV)
+# -> Project_Premier_League_Prediction/results
+RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 
 
 def main() -> None:
-    """Load data, train several models, and compare their performance."""
+    """Load data, train models, compare them and build league tables."""
+    # Crée le dossier results/ s'il n'existe pas
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
     print("=" * 70)
     print("Premier League Match Outcome Prediction")
     print("=" * 70)
 
-    # ------------------------------------------------------------------
-    # 1. Chargement et pré-processing des données historiques
-    # ------------------------------------------------------------------
-    print("\n1. Loading and preprocessing historical data...")
-    # X_train, X_test : features train/test (forme, goal diff, etc.)
-    # y_train, y_test : labels (0/1/2) pour chaque match
-    X_train, X_test, y_train, y_test = load_and_split()
-    print(f"   Train size: {X_train.shape}")
-    print(f"   Test size:  {X_test.shape}")
+    # --------------------------------------------------------------
+    # 1. Load and preprocess data
+    # --------------------------------------------------------------
+    print("\n1. Loading and preprocessing data...")
+    (
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        train_df,
+        test_df,
+    ) = load_train_test_with_metadata()
+    print(f"   Train size: {X_train.shape}")  # (n_train_matches, 4)
+    print(f"   Test size:  {X_test.shape}")   # (380, 4) pour 2024/25
 
-    # ------------------------------------------------------------------
-    # 2. Baseline très naïve : toujours prédire "home win"
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
+    # 2. Baseline model: always predict 'home win'
+    # --------------------------------------------------------------
     print("\n2. Baseline model (always predict 'home win')...")
-    # baseline_pred : array de la même taille que y_test rempli avec 2
-    # (2 = home win dans notre encodage)
+    # 2 = home win (voir result_map dans data_loader._add_basic_features)
     baseline_pred = np.full_like(y_test, fill_value=2)
     baseline_acc = accuracy_score(y_test, baseline_pred)
     print(f"Baseline accuracy: {baseline_acc:.3f}")
     print("Baseline confusion matrix:")
     print(confusion_matrix(y_test, baseline_pred))
 
-    # ------------------------------------------------------------------
-    # 3. Entraînement des modèles ML
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
+    # 3. Train machine-learning models
+    # --------------------------------------------------------------
     print("\n3. Training ML models...")
-    # rf_model : RandomForest entraîné sur X_train / y_train
     rf_model = train_random_forest(X_train, y_train)
-    # knn_model : KNN entraîné
     knn_model = train_knn(X_train, y_train)
-    # lr_model : Logistic Regression entraînée
     lr_model = train_logistic_regression(X_train, y_train)
+    gb_model = train_gradient_boosting(X_train, y_train)
     print("   ✓ All models trained.")
 
-    # Dictionnaire pour garder les objets modèles (utile pour récupérer le winner)
+    # Dictionnaire pour retrouver facilement un modèle par son nom
     trained_models = {
         "Random Forest": rf_model,
         "KNN": knn_model,
         "Logistic Regression": lr_model,
+        "Gradient Boosting": gb_model,
     }
 
-    # ------------------------------------------------------------------
-    # 4. Évaluation sur le test set (saison 2024/2025)
-    # ------------------------------------------------------------------
-    print("\n4. Evaluating ML models on 2024/2025 test season...")
-    # rf_acc, knn_acc, lr_acc : accuracies respectives
+    # --------------------------------------------------------------
+    # 4. Evaluate models on the test set
+    # --------------------------------------------------------------
+    print("\n4. Evaluating ML models on test set...")
     rf_acc = evaluate_model(rf_model, X_test, y_test, "Random Forest")
     knn_acc = evaluate_model(knn_model, X_test, y_test, "KNN")
     lr_acc = evaluate_model(lr_model, X_test, y_test, "Logistic Regression")
+    gb_acc = evaluate_model(gb_model, X_test, y_test, "Gradient Boosting")
 
-    # ------------------------------------------------------------------
-    # 5. Récap et meilleur modèle
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
+    # 5. Summary, best model, and accuracy plot
+    # --------------------------------------------------------------
     results = {
         "Baseline (Home Win)": baseline_acc,
         "Random Forest": rf_acc,
         "KNN": knn_acc,
         "Logistic Regression": lr_acc,
+        "Gradient Boosting": gb_acc,
     }
-    # winner_name : nom du modèle avec la meilleure accuracy (hors baseline si tu veux)
+
+    # Meilleur modèle (en termes d'accuracy)
     winner_name = max(results, key=results.get)
-    # best_model : instance du modèle gagnant (RandomForest / KNN / LogReg)
     best_model = trained_models.get(winner_name, rf_model)  # fallback RF
 
     print("\n" + "=" * 70)
@@ -108,76 +113,75 @@ def main() -> None:
     for name, acc in results.items():
         print(f" - {name}: {acc:.3f}")
     print("-" * 70)
-    print(f"Best model on test season: {winner_name} ({results[winner_name]:.3f} accuracy)")
+    print(f"Best model: {winner_name} ({results[winner_name]:.3f} accuracy)")
     print("=" * 70)
 
-    # ------------------------------------------------------------------
-    # 6. Prédiction des 14 premiers matches de 2025/2026
-    # ------------------------------------------------------------------
-    print("\n6. Predicting first 14 matchdays of 2025/2026...")
+    # Graphique des accuracies
+    acc_plot_path = os.path.join(RESULTS_DIR, "model_accuracies_2024_2025.png")
+    plot_model_accuracies(results, save_path=acc_plot_path)
+    print(f"\nSaved accuracy plot to: {acc_plot_path}")
 
-    # X_future : features pour les matches 2025/2026
-    # y_future : résultats réels (0/1/2) de ces matches
-    # meta_future : DataFrame (Date, home, away)
-    X_future, y_future, meta_future = load_future_season_for_prediction()
+    # --------------------------------------------------------------
+    # 6. League tables for 2024/2025 (test season)
+    # --------------------------------------------------------------
+    print("\n6. Building league tables for 2024/2025 test season...")
 
-    # y_future_pred : prédictions du best_model sur ces matches
-    y_future_pred = best_model.predict(X_future)
+    # Table réelle (à partir de result_code)
+    actual_table_2425 = build_league_table(test_df, result_col="result_code")
 
-    # future_acc : accuracy du modèle sur ces 14 matches
-    future_acc = accuracy_score(y_future, y_future_pred)
-    print(f"\nAccuracy of {winner_name} on 2025/2026 partial season: {future_acc:.3f}")
+    # Table prédite par le meilleur modèle
+    test_df = test_df.copy()
+    test_df["pred_code"] = best_model.predict(X_test)
+    predicted_table_2425 = build_league_table(test_df, result_col="pred_code")
 
-    # ------------------------------------------------------------------
-    # 7. Construction des classements (réel vs ML) sur 2025/2026 (14 journées)
-    # ------------------------------------------------------------------
-    from src.evaluation import compute_points_table  # déjà importé en haut, juste pour lisibilité
+    # Sauvegarde
+    actual_csv_2425 = os.path.join(RESULTS_DIR, "table_actual_2024_2025.csv")
+    pred_csv_2425 = os.path.join(RESULTS_DIR, "table_predicted_2024_2025.csv")
+    actual_table_2425.to_csv(actual_csv_2425)
+    predicted_table_2425.to_csv(pred_csv_2425)
 
-    # table_actual : classement réel (points_actual)
-    table_actual = compute_points_table(
-        matches=meta_future,
-        result_codes=y_future,
-        points_column="points_actual",
+    print(f"Saved actual 2024/2025 table to:   {actual_csv_2425}")
+    print(f"Saved predicted 2024/2025 table to: {pred_csv_2425}")
+
+    print("\nTop 8 – actual 2024/2025 table:")
+    print(actual_table_2425.head(8))
+    print("\nTop 8 – predicted 2024/2025 table (best model):")
+    print(predicted_table_2425.head(8))
+
+    # --------------------------------------------------------------
+    # 7. League tables for first 14 games of 2025/2026
+    # --------------------------------------------------------------
+    print("\n7. Predicting first 14 games of 2025/2026...")
+
+    future_df, X_future = load_future_season_features()
+    # future_df contient déjà result_code (réel) grâce à _add_basic_features
+
+    # Prédictions du meilleur modèle sur ces 14 matches
+    future_df = future_df.copy()
+    future_df["pred_code"] = best_model.predict(X_future)
+
+    # Classements réel et prédit (sur ces 14 matches uniquement)
+    actual_table_future = build_league_table(future_df, result_col="result_code")
+    predicted_table_future = build_league_table(future_df, result_col="pred_code")
+
+    actual_csv_future = os.path.join(
+        RESULTS_DIR, "table_actual_2025_2026_first14.csv"
     )
-
-    # table_pred : classement prédit par le modèle (points_pred)
-    table_pred = compute_points_table(
-        matches=meta_future,
-        result_codes=y_future_pred,
-        points_column="points_pred",
+    pred_csv_future = os.path.join(
+        RESULTS_DIR, "table_predicted_2025_2026_first14.csv"
     )
+    actual_table_future.to_csv(actual_csv_future)
+    predicted_table_future.to_csv(pred_csv_future)
 
-    # On merge les deux tableaux pour comparer par équipe
-    league_comparison = table_actual.merge(
-        table_pred, on="team", how="outer"
-    ).fillna(0)
+    print(f"\nSaved actual 2025/26 (first 14 games) table to:   {actual_csv_future}")
+    print(f"Saved predicted 2025/26 (first 14 games) table to: {pred_csv_future}")
 
-    # On ajoute une colonne "delta" = points_pred - points_actual
-    league_comparison["delta_points"] = (
-        league_comparison["points_pred"] - league_comparison["points_actual"]
-    )
-
-    # Tri par points réels décroissants (classement officiel)
-    league_comparison = league_comparison.sort_values(
-        "points_actual", ascending=False
-    ).reset_index(drop=True)
-
-    print("\nLeague table comparison on 2025/2026 partial season (first 14 matchdays):")
-    print(league_comparison)
-
-    # ------------------------------------------------------------------
-    # 8. Sauvegarde dans le dossier results/
-    # ------------------------------------------------------------------
-    results_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(results_dir, exist_ok=True)
-
-    output_path = os.path.join(results_dir, "league_table_2025_2026_partial.csv")
-    league_comparison.to_csv(output_path, index=False)
-
-    print(f"\nSaved league comparison table to: {output_path}")
+    print("\nActual table 2025/26 – first 14 games:")
+    print(actual_table_future.head(8))
+    print("\nPredicted table 2025/26 – first 14 games (best model):")
+    print(predicted_table_future.head(8))
 
 
 if __name__ == "__main__":
-    # Cette ligne garantit que main() est exécuté quand on fait `python main.py`
+    # This line makes sure main() runs when we type `python main.py`
     main()
-
