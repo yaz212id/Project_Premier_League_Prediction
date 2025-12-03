@@ -1,5 +1,10 @@
 """
 Data loading and feature creation for Premier League project.
+
+- Charge les saisons 2018–2025 pour l'entraînement / test.
+- Prépare les features (forme récente, goal diff) pour le modèle.
+- Prépare aussi une saison future (2025/2026, 14 premières journées)
+  pour faire des prédictions et comparer au classement réel.
 """
 
 import os
@@ -8,11 +13,28 @@ from typing import Tuple, List
 import numpy as np
 import pandas as pd
 
-# Folder where the raw CSVs live:
-# data/raw/PL_2018_2019_data.csv, ..., PL_2024_2025_data.csv
+# ---------------------------------------------------------------------
+# 0. Constantes globales
+# ---------------------------------------------------------------------
+
+# Colonnes de features utilisées par tous les modèles.
+# Ici :
+#   home_form      : moyenne des points des 5 derniers matches à domicile
+#   away_form      : moyenne des points des 5 derniers matches à l'extérieur
+#   home_gd_form   : moyenne des goal differences des 5 derniers matches à domicile
+#   away_gd_form   : idem à l'extérieur
+FEATURE_COLUMNS: List[str] = [
+    "home_form",
+    "away_form",
+    "home_gd_form",
+    "away_gd_form",
+]
+
+# Dossier où se trouvent les CSV bruts
+# -> data/raw/PL_2018_2019_data.csv, etc.
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
 
-# Filenames we expect to find in DATA_DIR
+# Fichiers des saisons utilisées pour TRAIN + TEST
 SEASONS = [
     "PL_2018_2019_data.csv",
     "PL_2019_2020_data.csv",
@@ -23,26 +45,32 @@ SEASONS = [
     "PL_2024_2025_data.csv",
 ]
 
+# Fichier de la saison FUTURE 2025/2026 (14 premières journées)
+FUTURE_SEASON_FILE = "epl-2025-GMTStandardTime.csv"
 
+
+# ---------------------------------------------------------------------
+# 1. Fonctions internes pour charger et nettoyer les CSV
+# ---------------------------------------------------------------------
 def _load_season(path: str) -> pd.DataFrame:
     """
-    Load one season CSV and keep only the useful columns.
+    Charge une saison et garde uniquement les colonnes utiles.
 
     Parameters
     ----------
     path : str
-        Full path to a Premier League CSV file.
+        Chemin complet vers un fichier CSV de Premier League.
 
     Returns
     -------
     df : pd.DataFrame
-        Cleaned dataframe with columns:
+        Dataframe nettoyé avec colonnes :
         Date, home, away, home_goals, away_goals, result
     """
-    # Skip the first text row (it’s just a description in these files)
+    # Football-data a une première ligne de description -> on la saute
     df = pd.read_csv(path, skiprows=1)
 
-    # Rename the original columns to something simpler
+    # Map des noms bruts vers des noms plus simples
     columns_map = {
         "HomeTeam": "home",
         "AwayTeam": "away",
@@ -59,9 +87,10 @@ def _load_season(path: str) -> pd.DataFrame:
 
 def _load_all_seasons() -> pd.DataFrame:
     """
-    Load and concatenate all seasons into one big dataframe.
+    Charge et concatène toutes les saisons d'entraînement / test.
     """
     dfs: List[pd.DataFrame] = []
+
     for fname in SEASONS:
         full_path = os.path.join(DATA_DIR, fname)
         if not os.path.exists(full_path):
@@ -72,24 +101,31 @@ def _load_all_seasons() -> pd.DataFrame:
     return df_all
 
 
+# ---------------------------------------------------------------------
+# 2. Création des features (forme, goal diff, etc.)
+# ---------------------------------------------------------------------
 def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add label (result_code) and 'form' features for home and away teams.
+    Ajoute le label (result_code) et les features de "forme" pour chaque match.
 
-    - result_code: 0 = away win, 1 = draw, 2 = home win
-    - home_form / away_form: average points in last 5 games
-    - home_gd_form / away_gd_form: average goal difference in last 5 games
+    - result_code : 0 = away win, 1 = draw, 2 = home win
+    - home_form / away_form : moyenne des points sur les 5 derniers matches
+    - home_gd_form / away_gd_form : moyenne du goal diff sur 5 matches
     """
-    # --- 1) Date & label ------------------------------------------------
+    # --------------------------------------------------------------
+    # a) Date + label numérique
+    # --------------------------------------------------------------
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
     df = df.sort_values("Date").reset_index(drop=True)
 
     result_map = {"A": 0, "D": 1, "H": 2}
     df["result_code"] = df["result"].map(result_map)
 
-    # --- 2) Points per game from each team’s perspective -----------------
+    # --------------------------------------------------------------
+    # b) Points par match pour chaque équipe
+    # --------------------------------------------------------------
     def result_to_points(res: str) -> tuple[int, int]:
-        """Return (home_points, away_points) for a given match result."""
+        """Retourne (points_home, points_away) pour un résultat donné."""
         if res == "H":
             return 3, 0
         if res == "A":
@@ -102,12 +138,13 @@ def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     df["home_points"] = pts.apply(lambda x: x[0])
     df["away_points"] = pts.apply(lambda x: x[1])
 
-    # Goal difference from each team’s perspective
+    # Goal difference pour chaque équipe
     df["home_gd"] = df["home_goals"] - df["away_goals"]
     df["away_gd"] = -df["home_gd"]
 
-    # --- 3) Long format to compute rolling form -------------------------
-    # One row per TEAM per MATCH (home & away together)
+    # --------------------------------------------------------------
+    # c) On passe en "long format" pour calculer la forme par équipe
+    # --------------------------------------------------------------
     home_long = df[["Date", "home", "home_points", "home_gd"]].rename(
         columns={"home": "team", "home_points": "points", "home_gd": "gd"}
     )
@@ -118,9 +155,9 @@ def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     long_df = pd.concat([home_long, away_long], ignore_index=True)
     long_df = long_df.sort_values(["team", "Date"])
 
-    # Rolling average over the last 5 matches.
-    # shift(1) ensures we only use PAST games for the current match.
-    window = 5
+    window = 5  # nombre de matches pour la moyenne mobile
+
+    # Moyenne mobile des points : on shift(1) pour n'utiliser que le passé
     long_df["form_pts"] = (
         long_df.groupby("team")["points"]
         .rolling(window=window, min_periods=1)
@@ -128,6 +165,7 @@ def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
         .shift(1)
         .reset_index(level=0, drop=True)
     )
+    # Moyenne mobile du goal diff
     long_df["form_gd"] = (
         long_df.groupby("team")["gd"]
         .rolling(window=window, min_periods=1)
@@ -136,10 +174,12 @@ def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(level=0, drop=True)
     )
 
-    # First matches have no history -> NaN; replace with 0
+    # Les premiers matches n'ont pas d'historique -> NaN, on met 0
     long_df[["form_pts", "form_gd"]] = long_df[["form_pts", "form_gd"]].fillna(0.0)
 
-    # --- 4) Merge back to original df to get home/away features ---------
+    # --------------------------------------------------------------
+    # d) Merge des features de forme sur le dataframe original
+    # --------------------------------------------------------------
     home_form = long_df[["Date", "team", "form_pts", "form_gd"]].rename(
         columns={
             "team": "home",
@@ -158,7 +198,6 @@ def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.merge(home_form, on=["Date", "home"], how="left")
     df = df.merge(away_form, on=["Date", "away"], how="left")
 
-    # Safety: fill remaining NaNs with 0
     df[["home_form", "away_form", "home_gd_form", "away_gd_form"]] = df[
         ["home_form", "away_form", "home_gd_form", "away_gd_form"]
     ].fillna(0.0)
@@ -166,16 +205,19 @@ def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# ---------------------------------------------------------------------
+# 3. Fonction principale : train / test split
+# ---------------------------------------------------------------------
 def load_and_split(
     test_start: str = "2024-08-01",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Load Premier League data, build features, and split into train/test.
+    Charge les saisons historiques, construit les features et fait le split.
 
     Parameters
     ----------
     test_start : str
-        All matches on or after this date go into the test set.
+        Toutes les matches à partir de cette date vont dans le test set.
 
     Returns
     -------
@@ -188,13 +230,43 @@ def load_and_split(
     train_df = df[df["Date"] < cutoff_date].copy()
     test_df = df[df["Date"] >= cutoff_date].copy()
 
-    # Our features: recent form and recent goal-diff form
-    feature_cols = ["home_form", "away_form", "home_gd_form", "away_gd_form"]
-
-    X_train = train_df[feature_cols].values
+    # On utilise les features définies en haut du fichier
+    X_train = train_df[FEATURE_COLUMNS].values
     y_train = train_df["result_code"].values
 
-    X_test = test_df[feature_cols].values
+    X_test = test_df[FEATURE_COLUMNS].values
     y_test = test_df["result_code"].values
 
     return X_train, X_test, y_train, y_test
+
+
+# ---------------------------------------------------------------------
+# 4. Chargement de la saison FUTURE 2025/2026 pour la prédiction
+# ---------------------------------------------------------------------
+def load_future_season_for_prediction() -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+    """
+    Prépare les matches de la saison 2025/2026 (14 premières journées).
+
+    Returns
+    -------
+    X_future : np.ndarray
+        Features pour les matches futurs.
+    y_future : np.ndarray
+        Labels réels (0/1/2) pour ces matches (utile pour comparer).
+    meta_future : pd.DataFrame
+        Infos sur les matches (Date, home, away) pour construire le classement.
+    """
+    future_path = os.path.join(DATA_DIR, FUTURE_SEASON_FILE)
+    if not os.path.exists(future_path):
+        raise FileNotFoundError(f"Missing future season CSV: {future_path}")
+
+    df_future = _load_season(future_path)
+    df_future = _add_basic_features(df_future)
+
+    X_future = df_future[FEATURE_COLUMNS].values
+    y_future = df_future["result_code"].values
+
+    # On garde Date, home, away pour reconstruire les classements
+    meta_future = df_future[["Date", "home", "away"]].copy()
+
+    return X_future, y_future, meta_future
