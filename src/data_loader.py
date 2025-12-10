@@ -23,7 +23,7 @@ FEATURE_COLUMNS: List[str] = [
 # => Project_Premier_League_Prediction/data/raw/...
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
 
-# Saisons historiques utilisées pour l'entraînement
+# Saisons historiques utilisées pour l'entraînement / test
 SEASONS = [
     "PL_2018_2019_data.csv",
     "PL_2019_2020_data.csv",
@@ -34,17 +34,19 @@ SEASONS = [
     "PL_2024_2025_data.csv",   # saison de test (380 matches)
 ]
 
-# Fichier qui contient les 14 premiers matches 2025/2026
-FUTURE_FILENAME = "epl-2025-GMTStandardTime.csv"  # adapte si ton nom diffère
+# Fichier qui contient la saison 2025/2026 complète (1–38),
+# mais on ne gardera que les 14 premières journées
+FUTURE_FILENAME = "epl-2025-GMTStandardTime.csv"
 
 
 # ------------------------------------------------------------
-# 2. Chargement d'une saison brute
+# 2. Chargement d'une saison historique football-data
 # ------------------------------------------------------------
 def _load_season(path: str) -> pd.DataFrame:
     """
-    Charge un CSV de football-data.co.uk et renvoie un DataFrame propre
-    avec les colonnes : Date, home, away, home_goals, away_goals, result.
+    Charge un CSV football-data.co.uk (saisons 2018–2025) et renvoie
+    un DataFrame propre avec les colonnes :
+        Date, home, away, home_goals, away_goals, result (H/D/A)
     """
     # football-data a une ligne de description en première ligne
     df = pd.read_csv(path, skiprows=1)
@@ -57,6 +59,16 @@ def _load_season(path: str) -> pd.DataFrame:
         "FTR": "result",   # H / D / A
         "Date": "Date",
     }
+
+    # On vérifie que les colonnes attendues existent
+    missing = [c for c in columns_map.keys() if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Le fichier {path} ne contient pas les colonnes attendues.\n"
+            f"Colonnes manquantes : {missing}\n"
+            f"Colonnes trouvées : {list(df.columns)}"
+        )
+
     df = df.rename(columns=columns_map)
 
     keep_cols = ["Date", "home", "away", "home_goals", "away_goals", "result"]
@@ -219,17 +231,82 @@ def load_train_test_with_metadata(
 
 
 # ------------------------------------------------------------
-# 5. Chargement de la saison future (14 matches 2025/26)
+# 5. Chargement de la saison future (14 premières journées 2025/26)
 # ------------------------------------------------------------
+def _load_future_matches(path: str) -> pd.DataFrame:
+    """
+    Charge le fichier epl-2025-GMTStandardTime.csv et renvoie
+    uniquement les matches des 14 premières journées avec colonnes :
+        Date, home, away, home_goals, away_goals, result, round
+    """
+    df = pd.read_csv(path)
+
+    # On renomme les colonnes importantes
+    df = df.rename(
+        columns={
+            "Home Team": "home",
+            "Away Team": "away",
+            "Round Number": "round",
+        }
+    )
+
+    # On parse la date (format du style "11/08/2025 20:00")
+    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
+
+    # On ne garde que les 14 premières journées
+    df = df[df["round"] <= 14].copy()
+
+    # On parse le score "4 - 2" ou "4–2" -> home_goals, away_goals
+    def parse_score(s):
+        if isinstance(s, str):
+            s_clean = s.replace(" ", "")
+            for sep in ["-", "–", "—"]:
+                if sep in s_clean:
+                    parts = s_clean.split(sep)
+                    if len(parts) == 2 and all(p.isdigit() for p in parts):
+                        return int(parts[0]), int(parts[1])
+        return np.nan, np.nan
+
+    goals = df["Result"].apply(parse_score)
+    df["home_goals"] = goals.apply(lambda x: x[0])
+    df["away_goals"] = goals.apply(lambda x: x[1])
+
+    # On construit H / D / A pour pouvoir calculer result_code etc.
+    def goals_to_result(row):
+        hg, ag = row["home_goals"], row["away_goals"]
+        if pd.isna(hg) or pd.isna(ag):
+            return None
+        if hg > ag:
+            return "H"
+        elif hg < ag:
+            return "A"
+        else:
+            return "D"
+
+    df["result"] = df.apply(goals_to_result, axis=1)
+
+    # On garde les colonnes utiles
+    df = df[["Date", "home", "away", "home_goals", "away_goals", "result", "round"]]
+
+    return df
+
+
 def load_future_season_features(
     future_filename: str = FUTURE_FILENAME,
 ):
     """
-    Construit les features pour les 14 premiers matches 2025/2026.
+    Construit les features pour les 14 premières journées de 2025/2026.
 
-    On concatène d'abord toutes les saisons historiques + ce fichier,
-    puis on recalcule les "formes" pour que la forme 2025/26 tienne
-    compte des saisons précédentes.
+    Étapes :
+      1. Charger toutes les saisons historiques (2018–2025)
+      2. Charger le fichier epl-2025-GMTStandardTime.csv
+         et garder uniquement Round <= 14
+      3. Concaténer historique + ces 14 journées
+      4. Recalculer les formes (_add_basic_features)
+      5. Extraire uniquement les matches de 2025/26 (14 journées)
+         et renvoyer :
+             - future_df (avec result_code réel)
+             - X_future (features pour le modèle)
     """
     hist_df = _load_all_seasons()
 
@@ -237,20 +314,28 @@ def load_future_season_features(
     if not os.path.exists(future_path):
         raise FileNotFoundError(f"Future season file not found: {future_path}")
 
-    future_raw = _load_season(future_path)
+    # 14 premières journées 2025/26
+    future_raw = _load_future_matches(future_path)
 
+    # On concatène historique + future (14 journées)
     combined_raw = pd.concat([hist_df, future_raw], ignore_index=True)
+
+    # On calcule les features et result_code pour tout
     combined_feat = _add_basic_features(combined_raw)
 
-    # Date minimale dans la saison 2025/26 -> début de la nouvelle saison
-    future_start = pd.to_datetime(
-        future_raw["Date"], dayfirst=True, errors="coerce"
-    ).min()
+    # Tous les matches 2025/26 sont après les saisons historiques
+    future_start = future_raw["Date"].min()
+    future_end = future_raw["Date"].max()
 
-    # On récupère uniquement les matches de la nouvelle saison
-    future_df = combined_feat[combined_feat["Date"] >= future_start].copy()
+    # On récupère uniquement les matches 2025/26 (14 journées)
+    future_df = combined_feat[
+        (combined_feat["Date"] >= future_start) & (combined_feat["Date"] <= future_end)
+    ].copy()
 
+    # Pour être sûr d'avoir le même ordre que le CSV futur
+    future_df = future_df.sort_values(["Date", "home", "away"]).reset_index(drop=True)
+
+    # Features pour le modèle
     X_future = future_df[FEATURE_COLUMNS].values
 
     return future_df, X_future
-
