@@ -1,12 +1,12 @@
 """
 Model definitions for Premier League match prediction.
 
-Objectif principal :
+principal objective :
 - Garder une bonne accuracy globale
 - Mieux prendre en compte la classe 1 = "draw" (match nul)
 
 Stratégies :
-- class_weight pour RF & Logistic Regression (on booste les nuls)
+- class_weight pour RF & Logistic Regression (boost the draws)
 - léger oversampling des nuls pour Gradient Boosting
 - KNN avec standardisation + pondération par la distance
 """
