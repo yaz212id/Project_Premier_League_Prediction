@@ -1,312 +1,330 @@
 """
-Data loading and feature creation for Premier League project.
+Data loading and feature engineering for the Premier League prediction project.
+
+- Loads historical seasons (football-data style CSVs)
+- Loads the 2025/26 schedule/results file
+- Builds simple "form" features:
+    * rolling mean of points over last N played matches
+    * rolling mean of goal difference over last N played matches
+
+This implementation is robust to:
+- header issues (accidentally reading a data row as header)
+- delimiter issues (comma/semicolon/tab)
 """
 
+from __future__ import annotations
+
 import os
-from typing import Tuple, List
+from collections import defaultdict, deque
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
 
-# ------------------------------------------------------------
-# 1. Colonnes de features utilisées par tous les modèles
-# ------------------------------------------------------------
-# X[...] sera un tableau numpy avec exactement ces colonnes :
+
+# ---------------------------------------------------------------------
+# Features used by every model
+# ---------------------------------------------------------------------
 FEATURE_COLUMNS: List[str] = [
-    "home_form",      # forme (points moyens) de l'équipe à domicile
-    "away_form",      # forme (points moyens) de l'équipe à l'extérieur
-    "home_gd_form",   # forme en différence de buts à domicile
-    "away_gd_form",   # forme en différence de buts à l'extérieur
+    "home_form",
+    "away_form",
+    "home_gd_form",
+    "away_gd_form",
 ]
 
-# Dossier où se trouvent les CSV bruts
-# => Project_Premier_League_Prediction/data/raw/...
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
+THIS_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.abspath(os.path.join(THIS_DIR, "..", "data", "raw"))
 
-# Saisons historiques utilisées pour l'entraînement / test
-SEASONS = [
+SEASONS: List[str] = [
     "PL_2018_2019_data.csv",
     "PL_2019_2020_data.csv",
     "PL_2020_2021_data.csv",
     "PL_2021_2022_data.csv",
     "PL_2022_2023_data.csv",
     "PL_2023_2024_data.csv",
-    "PL_2024_2025_data.csv",   # saison de test (380 matches)
+    "PL_2024_2025_data.csv",  # test season
 ]
 
-# Fichier qui contient la saison 2025/2026 complète (1–38),
-# mais on ne gardera que les 14 premières journées
 FUTURE_FILENAME = "epl-2025-GMTStandardTime.csv"
 
 
-# ------------------------------------------------------------
-# 2. Chargement d'une saison historique football-data
-# ------------------------------------------------------------
-def _load_season(path: str) -> pd.DataFrame:
+# ---------------------------------------------------------------------
+# CSV helpers (robust reading)
+# ---------------------------------------------------------------------
+def _read_csv_flexible(path: str) -> pd.DataFrame:
     """
-    Charge un CSV football-data.co.uk (saisons 2018–2025) et renvoie
-    un DataFrame propre avec les colonnes :
-        Date, home, away, home_goals, away_goals, result (H/D/A)
+    Try reading a CSV with common delimiters.
+    If everything fails, raise a helpful error (file may be corrupted).
     """
-    # football-data a une ligne de description en première ligne
-    df = pd.read_csv(path, skiprows=1)
+    errors = []
 
-    columns_map = {
-        "HomeTeam": "home",
-        "AwayTeam": "away",
-        "FTHG": "home_goals",
-        "FTAG": "away_goals",
-        "FTR": "result",   # H / D / A
-        "Date": "Date",
-    }
+    # 1) Normal CSV (comma) - fastest and usually correct
+    try:
+        return pd.read_csv(path, encoding="utf-8-sig")
+    except Exception as e:
+        errors.append(("comma/default", str(e)))
 
-    # On vérifie que les colonnes attendues existent
-    missing = [c for c in columns_map.keys() if c not in df.columns]
-    if missing:
-        raise ValueError(
-            f"Le fichier {path} ne contient pas les colonnes attendues.\n"
-            f"Colonnes manquantes : {missing}\n"
-            f"Colonnes trouvées : {list(df.columns)}"
-        )
+    # 2) Semicolon
+    try:
+        return pd.read_csv(path, sep=";", engine="python", encoding="utf-8-sig")
+    except Exception as e:
+        errors.append(("semicolon", str(e)))
 
-    df = df.rename(columns=columns_map)
+    # 3) Tab
+    try:
+        return pd.read_csv(path, sep="\t", engine="python", encoding="utf-8-sig")
+    except Exception as e:
+        errors.append(("tab", str(e)))
 
-    keep_cols = ["Date", "home", "away", "home_goals", "away_goals", "result"]
-    df = df[keep_cols].copy()
-    return df
+    # 4) Auto-sniff (slow but can rescue weird files)
+    try:
+        return pd.read_csv(path, sep=None, engine="python", encoding="utf-8-sig")
+    except Exception as e:
+        errors.append(("auto-sniff", str(e)))
+
+    msg = "\n".join([f"- {mode}: {err}" for mode, err in errors])
+    raise ValueError(
+        f"Could not parse CSV: {path}\n{msg}\n\n"
+        "Most common cause: the file is not a real CSV (e.g., saved webpage) or it was re-saved incorrectly.\n"
+        "Fix: re-download the raw CSV and put it back into data/raw/."
+    )
+
+
+def _pick_col(df: pd.DataFrame, candidates: List[str]) -> str:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    raise ValueError(f"Could not find any of columns {candidates}. Found: {list(df.columns)}")
+
+
+# ---------------------------------------------------------------------
+# Historical seasons (football-data like)
+# ---------------------------------------------------------------------
+def _standardize_historical_season(path: str) -> pd.DataFrame:
+    """
+    Return a clean DataFrame with columns:
+      Date, home, away, home_goals, away_goals, result  (H/D/A)
+    """
+    df = _read_csv_flexible(path)
+
+    # If header got messed up, try skipping the first row (ONLY if needed)
+    needed_any = {"HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", "Date"}
+    if len(set(df.columns).intersection(needed_any)) == 0:
+        df2 = _read_csv_flexible(path)
+        # try pandas skiprows only if first read did not include expected columns
+        try:
+            df2 = pd.read_csv(path, encoding="utf-8-sig", skiprows=1)
+            df = df2
+        except Exception:
+            # keep original df; the error will be raised below by _pick_col
+            pass
+
+    date_col = _pick_col(df, ["Date", "date"])
+    home_col = _pick_col(df, ["HomeTeam", "Home Team", "home", "Home"])
+    away_col = _pick_col(df, ["AwayTeam", "Away Team", "away", "Away"])
+    hg_col = _pick_col(df, ["FTHG", "HomeGoals", "HG"])
+    ag_col = _pick_col(df, ["FTAG", "AwayGoals", "AG"])
+    res_col = _pick_col(df, ["FTR", "Result", "res"])
+
+    out = df[[date_col, home_col, away_col, hg_col, ag_col, res_col]].copy()
+    out.columns = ["Date", "home", "away", "home_goals", "away_goals", "result"]
+
+    # Normalize result to H/D/A (some files already use H/D/A)
+    out["result"] = out["result"].astype(str).str.strip()
+    out["Date"] = pd.to_datetime(out["Date"], dayfirst=True, errors="coerce")
+
+    out = out.dropna(subset=["Date", "home", "away"]).reset_index(drop=True)
+    return out
 
 
 def _load_all_seasons() -> pd.DataFrame:
-    """
-    Charge et concatène toutes les saisons historiques dans un seul DataFrame.
-    """
     dfs: List[pd.DataFrame] = []
     for fname in SEASONS:
         full_path = os.path.join(DATA_DIR, fname)
         if not os.path.exists(full_path):
             raise FileNotFoundError(f"Missing CSV file: {full_path}")
-        dfs.append(_load_season(full_path))
-
-    df_all = pd.concat(dfs, ignore_index=True)
-    return df_all
+        dfs.append(_standardize_historical_season(full_path))
+    return pd.concat(dfs, ignore_index=True)
 
 
-# ------------------------------------------------------------
-# 3. Construction des features (forme, label, etc.)
-# ------------------------------------------------------------
-def _add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
+# ---------------------------------------------------------------------
+# Future season file (schedule/results)
+# ---------------------------------------------------------------------
+def _parse_score_to_goals(val) -> Tuple[float, float]:
+    if not isinstance(val, str):
+        return (np.nan, np.nan)
+
+    s = val.strip().replace(" ", "")
+    for sep in ["-", "–", "—"]:
+        if sep in s:
+            parts = s.split(sep)
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                return (float(parts[0]), float(parts[1]))
+    return (np.nan, np.nan)
+
+
+def _standardize_future_first14(path: str) -> pd.DataFrame:
     """
-    Ajoute :
-      - result_code (0 = away win, 1 = draw, 2 = home win)
-      - home_form / away_form : points moyens sur les 5 derniers matches
-      - home_gd_form / away_gd_form : diff. de buts moyenne sur 5 matches
+    Return a clean DataFrame for first 14 matchweeks with columns:
+      Date, home, away, home_goals, away_goals, result, round
     """
-    # Date en datetime + tri
+    df = _read_csv_flexible(path)
+
+    date_col = _pick_col(df, ["Date", "date", "Match Date"])
+    home_col = _pick_col(df, ["Home Team", "HomeTeam", "Home"])
+    away_col = _pick_col(df, ["Away Team", "AwayTeam", "Away"])
+    round_col = _pick_col(df, ["Round Number", "Round", "Week", "Matchweek"])
+
+    # score can be "Result" or similar
+    score_col = None
+    for c in ["Result", "Score", "FT", "Full Time Result"]:
+        if c in df.columns:
+            score_col = c
+            break
+
+    out = df[[date_col, home_col, away_col, round_col]].copy()
+    out.columns = ["Date", "home", "away", "round"]
+    out["Date"] = pd.to_datetime(out["Date"], dayfirst=True, errors="coerce")
+
+    # keep only first 14
+    out["round"] = pd.to_numeric(out["round"], errors="coerce")
+    out = out.dropna(subset=["round", "Date", "home", "away"]).copy()
+    out = out[out["round"] <= 14].copy()
+
+    # goals/result (may be missing for unplayed games)
+    out["home_goals"] = np.nan
+    out["away_goals"] = np.nan
+    out["result"] = None
+
+    if score_col is not None:
+        goals = df.loc[out.index, score_col].apply(_parse_score_to_goals)
+        out["home_goals"] = goals.apply(lambda x: x[0])
+        out["away_goals"] = goals.apply(lambda x: x[1])
+
+        def goals_to_result(hg, ag):
+            if pd.isna(hg) or pd.isna(ag):
+                return None
+            if hg > ag:
+                return "H"
+            if hg < ag:
+                return "A"
+            return "D"
+
+        out["result"] = [
+            goals_to_result(hg, ag) for hg, ag in zip(out["home_goals"], out["away_goals"])
+        ]
+
+    out = out[["Date", "home", "away", "home_goals", "away_goals", "result", "round"]]
+    out = out.sort_values(["Date", "home", "away"]).reset_index(drop=True)
+    return out
+
+
+# ---------------------------------------------------------------------
+# Feature engineering (form) - robust to missing future results
+# ---------------------------------------------------------------------
+def _add_form_features(df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
+    """
+    Add:
+      - result_code: 0=away win, 1=draw, 2=home win (NaN if unknown)
+      - home_form, away_form: rolling mean of points over last `window` played matches
+      - home_gd_form, away_gd_form: rolling mean of goal difference over last `window` played matches
+
+    IMPORTANT:
+    - if a match has no result, we still compute form from past matches,
+      but we do NOT update the history (so we don't poison future features).
+    """
+    df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
     df = df.sort_values("Date").reset_index(drop=True)
 
-    # Encodage du résultat en entier
     result_map = {"A": 0, "D": 1, "H": 2}
-    df["result_code"] = df["result"].map(result_map)
 
-    # Points par match pour chaque équipe
-    def result_to_points(res: str) -> tuple[int, int]:
-        if res == "H":
-            return 3, 0
-        if res == "A":
-            return 0, 3
-        if res == "D":
-            return 1, 1
-        return 0, 0
+    pts_hist = defaultdict(lambda: deque(maxlen=window))
+    gd_hist = defaultdict(lambda: deque(maxlen=window))
 
-    pts = df["result"].apply(result_to_points)
-    df["home_points"] = pts.apply(lambda x: x[0])
-    df["away_points"] = pts.apply(lambda x: x[1])
+    home_form = []
+    away_form = []
+    home_gd_form = []
+    away_gd_form = []
+    result_code = []
 
-    # Différence de buts
-    df["home_gd"] = df["home_goals"] - df["away_goals"]
-    df["away_gd"] = -df["home_gd"]
+    for _, row in df.iterrows():
+        h = row["home"]
+        a = row["away"]
 
-    # Passage en format "long" (une ligne par équipe et par match)
-    home_long = df[["Date", "home", "home_points", "home_gd"]].rename(
-        columns={"home": "team", "home_points": "points", "home_gd": "gd"}
-    )
-    away_long = df[["Date", "away", "away_points", "away_gd"]].rename(
-        columns={"away": "team", "away_points": "points", "away_gd": "gd"}
-    )
+        home_form.append(float(np.mean(pts_hist[h])) if len(pts_hist[h]) else 0.0)
+        away_form.append(float(np.mean(pts_hist[a])) if len(pts_hist[a]) else 0.0)
+        home_gd_form.append(float(np.mean(gd_hist[h])) if len(gd_hist[h]) else 0.0)
+        away_gd_form.append(float(np.mean(gd_hist[a])) if len(gd_hist[a]) else 0.0)
 
-    long_df = pd.concat([home_long, away_long], ignore_index=True)
-    long_df = long_df.sort_values(["team", "Date"])
+        res = row.get("result", None)
+        hg = row.get("home_goals", np.nan)
+        ag = row.get("away_goals", np.nan)
 
-    # Rolling moyenne sur les 5 derniers matches (shift(1) = seulement le passé)
-    window = 5
-    long_df["form_pts"] = (
-        long_df.groupby("team")["points"]
-        .rolling(window=window, min_periods=1)
-        .mean()
-        .shift(1)
-        .reset_index(level=0, drop=True)
-    )
-    long_df["form_gd"] = (
-        long_df.groupby("team")["gd"]
-        .rolling(window=window, min_periods=1)
-        .mean()
-        .shift(1)
-        .reset_index(level=0, drop=True)
-    )
+        if res in result_map and (not pd.isna(hg)) and (not pd.isna(ag)):
+            code = result_map[res]
+            result_code.append(code)
 
-    # Pas d’historique au tout début → NaN → 0
-    long_df[["form_pts", "form_gd"]] = long_df[["form_pts", "form_gd"]].fillna(0.0)
+            # points
+            if code == 2:  # home win
+                hp, ap = 3, 0
+            elif code == 0:  # away win
+                hp, ap = 0, 3
+            else:  # draw
+                hp, ap = 1, 1
 
-    # Retour en format "large" avec colonnes home_* et away_*
-    home_form = long_df[["Date", "team", "form_pts", "form_gd"]].rename(
-        columns={
-            "team": "home",
-            "form_pts": "home_form",
-            "form_gd": "home_gd_form",
-        }
-    )
-    away_form = long_df[["Date", "team", "form_pts", "form_gd"]].rename(
-        columns={
-            "team": "away",
-            "form_pts": "away_form",
-            "form_gd": "away_gd_form",
-        }
-    )
+            # goal difference
+            hgd = float(hg - ag)
+            agd = float(ag - hg)
 
-    df = df.merge(home_form, on=["Date", "home"], how="left")
-    df = df.merge(away_form, on=["Date", "away"], how="left")
+            pts_hist[h].append(hp)
+            pts_hist[a].append(ap)
+            gd_hist[h].append(hgd)
+            gd_hist[a].append(agd)
+        else:
+            result_code.append(np.nan)
 
-    df[["home_form", "away_form", "home_gd_form", "away_gd_form"]] = df[
-        ["home_form", "away_form", "home_gd_form", "away_gd_form"]
-    ].fillna(0.0)
+    df["home_form"] = home_form
+    df["away_form"] = away_form
+    df["home_gd_form"] = home_gd_form
+    df["away_gd_form"] = away_gd_form
+    df["result_code"] = result_code
 
     return df
 
 
-# ------------------------------------------------------------
-# 4. Split train / test pour les modèles
-# ------------------------------------------------------------
-def load_and_split(
-    test_start: str = "2024-08-01",
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+# ---------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------
+def load_train_test_with_metadata(test_start: str = "2024-08-01"):
     """
-    Version simple : ne renvoie que les tableaux numpy (comme au début du projet).
+    Returns:
+      X_train, X_test, y_train, y_test, train_df, test_df
     """
-    df = _load_all_seasons()
-    df = _add_basic_features(df)
+    all_df = _load_all_seasons()
+    all_df = _add_form_features(all_df, window=5)
 
-    cutoff_date = pd.Timestamp(test_start)
-    train_df = df[df["Date"] < cutoff_date].copy()
-    test_df = df[df["Date"] >= cutoff_date].copy()
+    cutoff = pd.Timestamp(test_start)
+    train_df = all_df[all_df["Date"] < cutoff].copy()
+    test_df = all_df[all_df["Date"] >= cutoff].copy()
 
-    X_train = train_df[FEATURE_COLUMNS].values
-    y_train = train_df["result_code"].values
-    X_test = test_df[FEATURE_COLUMNS].values
-    y_test = test_df["result_code"].values
+    X_train = train_df[FEATURE_COLUMNS].to_numpy()
+    y_train = train_df["result_code"].astype(int).to_numpy()
 
-    return X_train, X_test, y_train, y_test
-
-
-def load_train_test_with_metadata(
-    test_start: str = "2024-08-01",
-):
-    """
-    Version enrichie : renvoie aussi les DataFrames train_df / test_df
-    (avec les noms d'équipes, les dates, etc.) pour construire les classements.
-    """
-    df = _load_all_seasons()
-    df = _add_basic_features(df)
-
-    cutoff_date = pd.Timestamp(test_start)
-    train_df = df[df["Date"] < cutoff_date].copy()
-    test_df = df[df["Date"] >= cutoff_date].copy()
-
-    X_train = train_df[FEATURE_COLUMNS].values
-    y_train = train_df["result_code"].values
-    X_test = test_df[FEATURE_COLUMNS].values
-    y_test = test_df["result_code"].values
+    X_test = test_df[FEATURE_COLUMNS].to_numpy()
+    y_test = test_df["result_code"].astype(int).to_numpy()
 
     return X_train, X_test, y_train, y_test, train_df, test_df
 
 
-# ------------------------------------------------------------
-# 5. Chargement de la saison future (14 premières journées 2025/26)
-# ------------------------------------------------------------
-def _load_future_matches(path: str) -> pd.DataFrame:
+def load_future_season_features(future_filename: str = FUTURE_FILENAME):
     """
-    Charge le fichier epl-2025-GMTStandardTime.csv et renvoie
-    uniquement les matches des 14 premières journées avec colonnes :
-        Date, home, away, home_goals, away_goals, result, round
-    """
-    df = pd.read_csv(path)
+    Returns:
+      future_df, X_future
 
-    # On renomme les colonnes importantes
-    df = df.rename(
-        columns={
-            "Home Team": "home",
-            "Away Team": "away",
-            "Round Number": "round",
-        }
-    )
-
-    # On parse la date (format du style "11/08/2025 20:00")
-    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
-
-    # On ne garde que les 14 premières journées
-    df = df[df["round"] <= 14].copy()
-
-    # On parse le score "4 - 2" ou "4–2" -> home_goals, away_goals
-    def parse_score(s):
-        if isinstance(s, str):
-            s_clean = s.replace(" ", "")
-            for sep in ["-", "–", "—"]:
-                if sep in s_clean:
-                    parts = s_clean.split(sep)
-                    if len(parts) == 2 and all(p.isdigit() for p in parts):
-                        return int(parts[0]), int(parts[1])
-        return np.nan, np.nan
-
-    goals = df["Result"].apply(parse_score)
-    df["home_goals"] = goals.apply(lambda x: x[0])
-    df["away_goals"] = goals.apply(lambda x: x[1])
-
-    # On construit H / D / A pour pouvoir calculer result_code etc.
-    def goals_to_result(row):
-        hg, ag = row["home_goals"], row["away_goals"]
-        if pd.isna(hg) or pd.isna(ag):
-            return None
-        if hg > ag:
-            return "H"
-        elif hg < ag:
-            return "A"
-        else:
-            return "D"
-
-    df["result"] = df.apply(goals_to_result, axis=1)
-
-    # On garde les colonnes utiles
-    df = df[["Date", "home", "away", "home_goals", "away_goals", "result", "round"]]
-
-    return df
-
-
-def load_future_season_features(
-    future_filename: str = FUTURE_FILENAME,
-):
-    """
-    Construit les features pour les 14 premières journées de 2025/2026.
-
-    Étapes :
-      1. Charger toutes les saisons historiques (2018–2025)
-      2. Charger le fichier epl-2025-GMTStandardTime.csv
-         et garder uniquement Round <= 14
-      3. Concaténer historique + ces 14 journées
-      4. Recalculer les formes (_add_basic_features)
-      5. Extraire uniquement les matches de 2025/26 (14 journées)
-         et renvoyer :
-             - future_df (avec result_code réel)
-             - X_future (features pour le modèle)
+    future_df has:
+      - result_code (NaN if match not played / no score in file)
+      - form features ready for prediction
     """
     hist_df = _load_all_seasons()
 
@@ -314,28 +332,16 @@ def load_future_season_features(
     if not os.path.exists(future_path):
         raise FileNotFoundError(f"Future season file not found: {future_path}")
 
-    # 14 premières journées 2025/26
-    future_raw = _load_future_matches(future_path)
+    future_raw = _standardize_future_first14(future_path)
 
-    # On concatène historique + future (14 journées)
-    combined_raw = pd.concat([hist_df, future_raw], ignore_index=True)
+    hist_df["__is_future__"] = False
+    future_raw["__is_future__"] = True
 
-    # On calcule les features et result_code pour tout
-    combined_feat = _add_basic_features(combined_raw)
+    combined = pd.concat([hist_df, future_raw], ignore_index=True)
+    combined = _add_form_features(combined, window=5)
 
-    # Tous les matches 2025/26 sont après les saisons historiques
-    future_start = future_raw["Date"].min()
-    future_end = future_raw["Date"].max()
+    future_df = combined[combined["__is_future__"]].copy()
+    future_df = future_df.drop(columns=["__is_future__"]).reset_index(drop=True)
 
-    # On récupère uniquement les matches 2025/26 (14 journées)
-    future_df = combined_feat[
-        (combined_feat["Date"] >= future_start) & (combined_feat["Date"] <= future_end)
-    ].copy()
-
-    # Pour être sûr d'avoir le même ordre que le CSV futur
-    future_df = future_df.sort_values(["Date", "home", "away"]).reset_index(drop=True)
-
-    # Features pour le modèle
-    X_future = future_df[FEATURE_COLUMNS].values
-
+    X_future = future_df[FEATURE_COLUMNS].to_numpy()
     return future_df, X_future

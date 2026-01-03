@@ -1,153 +1,52 @@
-"""Evaluation helpers for Premier League models."""
+"""
+Evaluation helpers for Premier League models.
 
-from typing import Dict
+Includes:
+- league table builder (robust to NaNs)
+- Wilson 95% CI for accuracy
+- McNemar exact test p-value vs baseline (no SciPy needed)
+- clean accuracy summary plot
+- logistic regression coefficient heatmap
+"""
 
-import numpy as np
-import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from __future__ import annotations
 
-
-def evaluate_model(
-    model,
-    X_test: np.ndarray,
-    y_test: np.ndarray,
-    model_name: str,
-    print_report: bool = True,
-) -> float:
-    """
-    Évalue un modèle sur le test set et affiche quelques métriques.
-
-    Parameters
-    ----------
-    model : objet sklearn
-        Modèle déjà entraîné (RandomForest, KNN, LogisticRegression, etc.).
-    X_test : np.ndarray
-        Features du test set.
-    y_test : np.ndarray
-        Labels réels du test set.
-    model_name : str
-        Nom du modèle (pour l'affichage).
-    print_report : bool
-        Si True, affiche accuracy, classification_report, confusion_matrix.
-
-    Returns
-    -------
-    accuracy : float
-        Accuracy globale du modèle sur le test set.
-    """
-    # y_pred : prédictions de classe 0/1/2
-    y_pred = model.predict(X_test)
-
-    # acc : accuracy globale
-    acc = accuracy_score(y_test, y_pred)
-
-    if print_report:
-        print(f"\n{model_name} Results")
-        print("-" * (len(model_name) + 8))
-        print(f"Accuracy: {acc:.3f}")
-        print("\nClassification report:")
-        print(classification_report(y_test, y_pred, zero_division=0))
-        print("Confusion matrix:")
-        print(confusion_matrix(y_test, y_pred))
-
-    return acc
-
-
-def compute_points_table(
-    matches: pd.DataFrame,
-    result_codes: np.ndarray,
-    points_column: str,
-) -> pd.DataFrame:
-    """
-    Construit un classement (table de points) à partir de prédictions ou de résultats.
-
-    Parameters
-    ----------
-    matches : pd.DataFrame
-        DataFrame avec au moins les colonnes 'home' et 'away'.
-        Une ligne = un match (home vs away).
-    result_codes : np.ndarray
-        Résultats 0/1/2 pour chaque match :
-            0 = away win
-            1 = draw
-            2 = home win
-    points_column : str
-        Nom de la colonne de points dans le tableau retourné
-        (ex: 'points_actual', 'points_pred').
-
-    Returns
-    -------
-    table : pd.DataFrame
-        Colonnes : ['team', points_column], classées par points décroissants.
-    """
-    # table_points : dict[str, int] -> points cumulés pour chaque équipe
-    table_points: Dict[str, int] = {}
-
-    # On parcourt chaque match avec son résultat
-    for (_, row), res in zip(matches.iterrows(), result_codes):
-        home_team = row["home"]
-        away_team = row["away"]
-
-        # Initialisation à 0 si l'équipe n'est pas encore dans le dict
-        table_points.setdefault(home_team, 0)
-        table_points.setdefault(away_team, 0)
-
-        # Attribution des points selon le code 0/1/2
-        if res == 2:  # home win
-            table_points[home_team] += 3
-        elif res == 1:  # draw
-            table_points[home_team] += 1
-            table_points[away_team] += 1
-        elif res == 0:  # away win
-            table_points[away_team] += 3
-
-    # On convertit le dict en DataFrame
-    table = pd.DataFrame(
-        {
-            "team": list(table_points.keys()),
-            points_column: list(table_points.values()),
-        }
-    )
-
-    # Tri par points décroissants
-    table = table.sort_values(points_column, ascending=False).reset_index(drop=True)
-    return table
+from collections import defaultdict
+from math import comb, sqrt
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
-from collections import defaultdict
+import numpy as np
 import pandas as pd
+from sklearn.metrics import accuracy_score
 
 
 def build_league_table(matches_df: pd.DataFrame, result_col: str) -> pd.DataFrame:
     """
-    Construit un classement à partir d'un DataFrame de matches.
+    Build a league table from a match dataframe.
 
-    Paramètres
-    ----------
-    matches_df : DataFrame avec au moins les colonnes :
-        - 'home' (équipe domicile)
-        - 'away' (équipe extérieur)
-        - result_col (0 = away win, 1 = draw, 2 = home win)
-    result_col : str
-        Nom de la colonne contenant le résultat (ex: 'result_code' ou 'pred_code').
+    Required columns:
+      - home, away
+      - result_col:
+          0 = away win
+          1 = draw
+          2 = home win
 
-    Retour
-    ------
-    table : DataFrame indexé par équipe avec colonnes :
-        - P  (matches joués)
-        - W  (victoires)
-        - D  (nuls)
-        - L  (défaites)
-        - Pts (points)
+    IMPORTANT:
+    - rows with NaN in result_col are skipped (this fixes your NaN->int crash).
+    - outputs are integers (P/W/D/L/Pts).
     """
     table = defaultdict(lambda: {"P": 0, "W": 0, "D": 0, "L": 0, "Pts": 0})
 
     for _, row in matches_df.iterrows():
+        res = row.get(result_col)
+        if pd.isna(res):
+            continue
+
         home = row["home"]
         away = row["away"]
-        res = row[result_col]  # 0 / 1 / 2
+        res = int(res)
 
-        # Tous les matches comptent pour 1 joué
         table[home]["P"] += 1
         table[away]["P"] += 1
 
@@ -159,44 +58,140 @@ def build_league_table(matches_df: pd.DataFrame, result_col: str) -> pd.DataFram
             table[away]["W"] += 1
             table[away]["Pts"] += 3
             table[home]["L"] += 1
-        elif res == 1:  # draw
+        else:  # draw
             table[home]["D"] += 1
             table[away]["D"] += 1
             table[home]["Pts"] += 1
             table[away]["Pts"] += 1
 
-    table_df = pd.DataFrame.from_dict(table, orient="index")
-    table_df.index.name = "Team"
+    df = pd.DataFrame.from_dict(table, orient="index")
+    df.index.name = "Team"
+    df = df.sort_values(by=["Pts", "W"], ascending=False)
+    df.insert(0, "Pos", range(1, len(df) + 1))
 
-    # Tri par points décroissants puis par victoires (juste pour stabiliser)
-    table_df = table_df.sort_values(by=["Pts", "W"], ascending=False)
+    for c in ["Pos", "P", "W", "D", "L", "Pts"]:
+        df[c] = df[c].astype(int)
 
-    # Ajout d'une colonne "Position"
-    table_df.insert(0, "Pos", range(1, len(table_df) + 1))
-
-    return table_df
+    return df
 
 
-def plot_model_accuracies(results: dict, save_path: str | None = None) -> None:
+def accuracy_ci_wilson(k: int, n: int, z: float = 1.96) -> Tuple[float, float]:
     """
-    Dessine un barplot des scores de chaque modèle.
-
-    results : dict {nom_du_modèle: accuracy}
-    save_path : si non None, enregistre le graphique dans ce fichier.
+    Wilson score interval for binomial proportion.
     """
-    names = list(results.keys())
-    accuracies = list(results.values())
+    if n == 0:
+        return (0.0, 0.0)
 
-    plt.figure(figsize=(8, 4))
-    plt.bar(names, accuracies)
+    phat = k / n
+    denom = 1.0 + (z**2) / n
+    center = (phat + (z**2) / (2 * n)) / denom
+    half = (z * sqrt((phat * (1 - phat) / n) + (z**2 / (4 * n**2)))) / denom
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
+def mcnemar_pvalue_vs_baseline(
+    y_true: np.ndarray, y_pred_model: np.ndarray, y_pred_base: np.ndarray
+) -> float:
+    """
+    McNemar exact test using discordant pairs:
+      b = model correct, baseline wrong
+      c = model wrong, baseline correct
+
+    p-value = 2 * BinomialCDF(min(b,c); n=b+c, p=0.5)
+    """
+    model_correct = (y_pred_model == y_true)
+    base_correct = (y_pred_base == y_true)
+
+    b = int(np.sum(model_correct & (~base_correct)))
+    c = int(np.sum((~model_correct) & base_correct))
+    n = b + c
+
+    if n == 0:
+        return 1.0
+
+    m = min(b, c)
+    cdf = 0.0
+    for i in range(0, m + 1):
+        cdf += comb(n, i) * (0.5**n)
+
+    return float(min(1.0, 2.0 * cdf))
+
+
+def plot_accuracy_summary(summary_df: pd.DataFrame, save_path: str, title: str) -> None:
+    """
+    summary_df expected columns:
+      model, accuracy, ci_low, ci_high, p_value (NaN allowed for baseline)
+    """
+    names = summary_df["model"].tolist()
+    acc = summary_df["accuracy"].to_numpy()
+    ci_low = summary_df["ci_low"].to_numpy()
+    ci_high = summary_df["ci_high"].to_numpy()
+    pvals = summary_df["p_value"].to_numpy()
+
+    yerr = np.vstack([acc - ci_low, ci_high - acc])
+
+    plt.figure(figsize=(10, 4))
+    x = np.arange(len(names))
+
+    plt.bar(x, acc, width=0.55)
+    plt.errorbar(x, acc, yerr=yerr, fmt="none", capsize=4)
+
+    plt.ylim(0, 1.0)
     plt.ylabel("Accuracy")
-    plt.ylim(0, 1)
-    plt.title("Model accuracies on 2024/2025 test season")
-    plt.xticks(rotation=20, ha="right")
+    plt.title(title)
+    plt.xticks(x, names, rotation=18, ha="right")
+
+    for i, pv in enumerate(pvals):
+        if np.isnan(pv):
+            continue
+        plt.text(i, acc[i] + 0.02, f"p={pv:.3f}", ha="center", fontsize=9)
 
     plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
 
-    if save_path is not None:
-        plt.savefig(save_path, bbox_inches="tight")
+
+def plot_logistic_regression_coefficients(
+    model,
+    feature_names: Optional[list[str]],
+    save_path: str,
+    title: str = "Logistic Regression coefficients (multiclass)",
+) -> None:
+    """
+    Works with:
+      - LogisticRegression
+      - Pipeline(scaler -> logreg)
+    """
+    if hasattr(model, "named_steps") and "logreg" in model.named_steps:
+        lr = model.named_steps["logreg"]
     else:
-        plt.show()
+        lr = model
+
+    if not hasattr(lr, "coef_"):
+        return
+
+    coef = lr.coef_
+    n_classes, n_features = coef.shape
+
+    if not feature_names or len(feature_names) != n_features:
+        feature_names = [f"feature_{i}" for i in range(n_features)]
+
+    plt.figure(figsize=(10, 3.2))
+    im = plt.imshow(coef, aspect="auto")
+    plt.colorbar(im, fraction=0.02, pad=0.02)
+
+    plt.title(title)
+    plt.yticks(range(n_classes), [f"class {i}" for i in range(n_classes)])
+    plt.xticks(range(n_features), feature_names, rotation=25, ha="right")
+
+    for i in range(n_classes):
+        for j in range(n_features):
+            plt.text(j, i, f"{coef[i, j]:.2f}", ha="center", va="center", fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
+
+
+def simple_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    return float(accuracy_score(y_true, y_pred))

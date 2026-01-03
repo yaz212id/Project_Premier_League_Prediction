@@ -1,0 +1,141 @@
+Date,round,home,away,result,result_code,pred_code
+2025-08-15 20:00:00,1.0,Liverpool,Bournemouth,H,2.0,1
+2025-08-16 12:30:00,1.0,Aston Villa,Newcastle,D,1.0,2
+2025-08-16 15:00:00,1.0,Spurs,Burnley,H,2.0,2
+2025-08-16 15:00:00,1.0,Sunderland,West Ham,H,2.0,0
+2025-08-16 15:00:00,1.0,Brighton,Fulham,D,1.0,2
+2025-08-16 17:30:00,1.0,Wolves,Man City,A,0.0,0
+2025-08-17 14:00:00,1.0,Chelsea,Crystal Palace,D,1.0,0
+2025-08-17 14:00:00,1.0,Nott'm Forest,Brentford,H,2.0,2
+2025-08-17 16:30:00,1.0,Man Utd,Arsenal,A,0.0,0
+2025-08-18 20:00:00,1.0,Leeds,Everton,H,2.0,0
+2025-08-22 20:00:00,2.0,West Ham,Chelsea,A,0.0,2
+2025-08-23 12:30:00,2.0,Man City,Spurs,A,0.0,0
+2025-08-23 15:00:00,2.0,Brentford,Aston Villa,H,2.0,2
+2025-08-23 15:00:00,2.0,Burnley,Sunderland,H,2.0,0
+2025-08-23 15:00:00,2.0,Bournemouth,Wolves,H,2.0,2
+2025-08-23 17:30:00,2.0,Arsenal,Leeds,H,2.0,2
+2025-08-24 14:00:00,2.0,Crystal Palace,Nott'm Forest,D,1.0,2
+2025-08-24 14:00:00,2.0,Everton,Brighton,H,2.0,2
+2025-08-24 16:30:00,2.0,Fulham,Man Utd,D,1.0,2
+2025-08-25 20:00:00,2.0,Newcastle,Liverpool,A,0.0,2
+2025-08-30 12:30:00,3.0,Chelsea,Fulham,H,2.0,2
+2025-08-30 15:00:00,3.0,Sunderland,Brentford,H,2.0,2
+2025-08-30 15:00:00,3.0,Man Utd,Burnley,H,2.0,2
+2025-08-30 15:00:00,3.0,Spurs,Bournemouth,A,0.0,2
+2025-08-30 15:00:00,3.0,Wolves,Everton,A,0.0,0
+2025-08-30 17:30:00,3.0,Leeds,Newcastle,D,1.0,0
+2025-08-31 14:00:00,3.0,Brighton,Man City,H,2.0,2
+2025-08-31 14:00:00,3.0,Nott'm Forest,West Ham,A,0.0,2
+2025-08-31 16:30:00,3.0,Liverpool,Arsenal,H,2.0,0
+2025-08-31 19:00:00,3.0,Aston Villa,Crystal Palace,A,0.0,0
+2025-09-13 12:30:00,4.0,Arsenal,Nott'm Forest,H,2.0,2
+2025-09-13 15:00:00,4.0,Fulham,Leeds,H,2.0,2
+2025-09-13 15:00:00,4.0,Everton,Aston Villa,D,1.0,2
+2025-09-13 15:00:00,4.0,Newcastle,Wolves,H,2.0,2
+2025-09-13 15:00:00,4.0,Bournemouth,Brighton,H,2.0,0
+2025-09-13 15:00:00,4.0,Crystal Palace,Sunderland,D,1.0,2
+2025-09-13 17:30:00,4.0,West Ham,Spurs,A,0.0,0
+2025-09-13 20:00:00,4.0,Brentford,Chelsea,D,1.0,0
+2025-09-14 14:00:00,4.0,Burnley,Liverpool,A,0.0,0
+2025-09-14 16:30:00,4.0,Man City,Man Utd,H,2.0,2
+2025-09-20 12:30:00,5.0,Liverpool,Everton,H,2.0,0
+2025-09-20 15:00:00,5.0,Wolves,Leeds,A,0.0,2
+2025-09-20 15:00:00,5.0,Brighton,Spurs,D,1.0,0
+2025-09-20 15:00:00,5.0,Burnley,Nott'm Forest,D,1.0,2
+2025-09-20 15:00:00,5.0,West Ham,Crystal Palace,A,0.0,0
+2025-09-20 17:30:00,5.0,Man Utd,Chelsea,H,2.0,0
+2025-09-20 20:00:00,5.0,Fulham,Brentford,H,2.0,2
+2025-09-21 14:00:00,5.0,Sunderland,Aston Villa,D,1.0,2
+2025-09-21 14:00:00,5.0,Bournemouth,Newcastle,D,1.0,2
+2025-09-21 16:30:00,5.0,Arsenal,Man City,D,1.0,2
+2025-09-27 12:30:00,6.0,Brentford,Man Utd,H,2.0,0
+2025-09-27 15:00:00,6.0,Chelsea,Brighton,A,0.0,2
+2025-09-27 15:00:00,6.0,Crystal Palace,Liverpool,H,2.0,2
+2025-09-27 15:00:00,6.0,Leeds,Bournemouth,D,1.0,2
+2025-09-27 15:00:00,6.0,Man City,Burnley,H,2.0,2
+2025-09-27 17:30:00,6.0,Nott'm Forest,Sunderland,A,0.0,2
+2025-09-27 20:00:00,6.0,Spurs,Wolves,D,1.0,2
+2025-09-28 14:00:00,6.0,Aston Villa,Fulham,H,2.0,2
+2025-09-28 16:30:00,6.0,Newcastle,Arsenal,A,0.0,0
+2025-09-29 20:00:00,6.0,Everton,West Ham,D,1.0,2
+2025-10-03 20:00:00,7.0,Bournemouth,Fulham,H,2.0,2
+2025-10-04 12:30:00,7.0,Leeds,Spurs,A,0.0,0
+2025-10-04 15:00:00,7.0,Arsenal,West Ham,H,2.0,2
+2025-10-04 15:00:00,7.0,Man Utd,Sunderland,H,2.0,2
+2025-10-04 17:30:00,7.0,Chelsea,Liverpool,H,2.0,2
+2025-10-05 14:00:00,7.0,Aston Villa,Burnley,H,2.0,1
+2025-10-05 14:00:00,7.0,Everton,Crystal Palace,H,2.0,0
+2025-10-05 14:00:00,7.0,Newcastle,Nott'm Forest,H,2.0,2
+2025-10-05 14:00:00,7.0,Wolves,Brighton,D,1.0,2
+2025-10-05 16:30:00,7.0,Brentford,Man City,A,0.0,0
+2025-10-18 12:30:00,8.0,Nott'm Forest,Chelsea,A,0.0,0
+2025-10-18 15:00:00,8.0,Brighton,Newcastle,H,2.0,0
+2025-10-18 15:00:00,8.0,Burnley,Leeds,H,2.0,0
+2025-10-18 15:00:00,8.0,Crystal Palace,Bournemouth,D,1.0,2
+2025-10-18 15:00:00,8.0,Man City,Everton,H,2.0,2
+2025-10-18 15:00:00,8.0,Sunderland,Wolves,H,2.0,2
+2025-10-18 17:30:00,8.0,Fulham,Arsenal,A,0.0,0
+2025-10-19 14:00:00,8.0,Spurs,Aston Villa,A,0.0,2
+2025-10-19 16:30:00,8.0,Liverpool,Man Utd,A,0.0,2
+2025-10-20 20:00:00,8.0,West Ham,Brentford,A,0.0,0
+2025-10-24 20:00:00,9.0,Leeds,West Ham,H,2.0,2
+2025-10-25 15:00:00,9.0,Newcastle,Fulham,H,2.0,2
+2025-10-25 15:00:00,9.0,Chelsea,Sunderland,A,0.0,0
+2025-10-25 17:30:00,9.0,Man Utd,Brighton,H,2.0,2
+2025-10-25 20:00:00,9.0,Brentford,Liverpool,H,2.0,2
+2025-10-26 14:00:00,9.0,Arsenal,Crystal Palace,H,2.0,2
+2025-10-26 14:00:00,9.0,Aston Villa,Man City,H,2.0,2
+2025-10-26 14:00:00,9.0,Wolves,Burnley,A,0.0,2
+2025-10-26 16:00:00,9.0,Bournemouth,Nott'm Forest,H,2.0,2
+2025-10-26 16:30:00,9.0,Everton,Spurs,A,0.0,2
+2025-11-01 15:00:00,10.0,Nott'm Forest,Man Utd,D,1.0,0
+2025-11-01 15:00:00,10.0,Fulham,Wolves,H,2.0,0
+2025-11-01 15:00:00,10.0,Burnley,Arsenal,A,0.0,0
+2025-11-01 15:00:00,10.0,Crystal Palace,Brentford,H,2.0,2
+2025-11-01 15:00:00,10.0,Brighton,Leeds,H,2.0,2
+2025-11-01 17:30:00,10.0,Spurs,Chelsea,A,0.0,2
+2025-11-01 20:00:00,10.0,Liverpool,Aston Villa,H,2.0,0
+2025-11-02 14:00:00,10.0,West Ham,Newcastle,H,2.0,0
+2025-11-02 16:30:00,10.0,Man City,Bournemouth,H,2.0,2
+2025-11-03 20:00:00,10.0,Sunderland,Everton,D,1.0,2
+2025-11-08 12:30:00,11.0,Spurs,Man Utd,D,1.0,2
+2025-11-08 15:00:00,11.0,Everton,Fulham,H,2.0,0
+2025-11-08 15:00:00,11.0,West Ham,Burnley,H,2.0,1
+2025-11-08 17:30:00,11.0,Sunderland,Arsenal,D,1.0,0
+2025-11-08 20:00:00,11.0,Chelsea,Wolves,H,2.0,2
+2025-11-09 14:00:00,11.0,Aston Villa,Bournemouth,H,2.0,2
+2025-11-09 14:00:00,11.0,Brentford,Newcastle,H,2.0,2
+2025-11-09 14:00:00,11.0,Crystal Palace,Brighton,D,1.0,2
+2025-11-09 14:00:00,11.0,Nott'm Forest,Leeds,H,2.0,0
+2025-11-09 16:30:00,11.0,Man City,Liverpool,H,2.0,2
+2025-11-22 12:30:00,12.0,Burnley,Chelsea,A,0.0,0
+2025-11-22 15:00:00,12.0,Wolves,Crystal Palace,A,0.0,0
+2025-11-22 15:00:00,12.0,Liverpool,Nott'm Forest,A,0.0,2
+2025-11-22 15:00:00,12.0,Fulham,Sunderland,H,2.0,2
+2025-11-22 15:00:00,12.0,Brighton,Brentford,H,2.0,2
+2025-11-22 15:00:00,12.0,Bournemouth,West Ham,D,1.0,0
+2025-11-22 17:30:00,12.0,Newcastle,Man City,H,2.0,0
+2025-11-23 14:00:00,12.0,Leeds,Aston Villa,A,0.0,0
+2025-11-23 16:30:00,12.0,Arsenal,Spurs,H,2.0,2
+2025-11-24 20:00:00,12.0,Man Utd,Everton,A,0.0,2
+2025-11-29 15:00:00,13.0,Brentford,Burnley,H,2.0,2
+2025-11-29 15:00:00,13.0,Man City,Leeds,H,2.0,2
+2025-11-29 15:00:00,13.0,Sunderland,Bournemouth,H,2.0,2
+2025-11-29 17:30:00,13.0,Everton,Newcastle,A,0.0,2
+2025-11-29 20:00:00,13.0,Spurs,Fulham,A,0.0,0
+2025-11-30 12:00:00,13.0,Crystal Palace,Man Utd,A,0.0,1
+2025-11-30 14:05:00,13.0,Aston Villa,Wolves,H,2.0,2
+2025-11-30 14:05:00,13.0,Nott'm Forest,Brighton,A,0.0,1
+2025-11-30 14:05:00,13.0,West Ham,Liverpool,A,0.0,2
+2025-11-30 16:30:00,13.0,Chelsea,Arsenal,D,1.0,2
+2025-12-02 19:30:00,14.0,Bournemouth,Everton,,,0
+2025-12-02 19:30:00,14.0,Fulham,Man City,,,0
+2025-12-02 20:15:00,14.0,Newcastle,Spurs,,,2
+2025-12-03 19:30:00,14.0,Brighton,Aston Villa,,,2
+2025-12-03 19:30:00,14.0,Burnley,Crystal Palace,,,1
+2025-12-03 19:30:00,14.0,Arsenal,Brentford,,,1
+2025-12-03 19:30:00,14.0,Wolves,Nott'm Forest,,,2
+2025-12-03 20:15:00,14.0,Liverpool,Sunderland,,,2
+2025-12-03 20:15:00,14.0,Leeds,Chelsea,,,0
+2025-12-04 20:00:00,14.0,Man Utd,West Ham,,,2
